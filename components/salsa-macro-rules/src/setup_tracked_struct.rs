@@ -44,6 +44,9 @@ macro_rules! setup_tracked_struct {
         // Absolute indices of any tracked fields, relative to all other fields of this struct.
         tracked_indices: [$($tracked_index:tt),*],
 
+        // Indices of any tracked fields, relative to only tracked fields on this struct.
+        relative_tracked_indices: [$($relative_tracked_index:tt),*],
+
         // Absolute indices of any untracked fields.
         untracked_indices: [$($untracked_index:tt),*],
 
@@ -233,7 +236,7 @@ macro_rules! setup_tracked_struct {
                         $Db: ?Sized + $zalsa::Database,
                     {
                         let db = db.as_dyn_database();
-                        let fields = $Configuration::ingredient(db).tracked_field(db, self, $tracked_index);
+                        let fields = $Configuration::ingredient(db).tracked_field(db, self, $tracked_index, $relative_tracked_index);
                         $crate::maybe_clone!(
                             $tracked_option,
                             $tracked_ty,

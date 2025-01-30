@@ -108,15 +108,9 @@ impl<C: Configuration> Jar for JarImpl<C> {
     ) -> Vec<Box<dyn Ingredient>> {
         let struct_ingredient = <IngredientImpl<C>>::new(struct_index);
 
-        // If there are no tracked fields, we can skip creating any ingredients.
-        if C::TRACKED_FIELD_DEBUG_NAMES.is_empty() {
-            return vec![Box::new(struct_ingredient)];
-        }
-
         std::iter::once(Box::new(struct_ingredient) as _)
-            // Otherwise, we have to create ingredients for untracked fields as well, in
-            // order to keep field indices relative to the entire struct.
-            .chain((0..C::FIELD_DEBUG_NAMES.len()).map(|field_index| {
+            // Note that the ingredients indices are relative only to tracked fields.
+            .chain((0..C::TRACKED_FIELD_DEBUG_NAMES.len()).map(|field_index| {
                 Box::new(<FieldIngredientImpl<C>>::new(struct_index, field_index)) as _
             }))
             .collect()
@@ -553,10 +547,11 @@ where
         db: &'db dyn crate::Database,
         s: C::Struct<'db>,
         field_index: usize,
+        relative_field_index: usize,
     ) -> &'db C::Fields<'db> {
         let (zalsa, zalsa_local) = db.zalsas();
         let id = C::deref_struct(s);
-        let field_ingredient_index = self.ingredient_index.successor(field_index);
+        let field_ingredient_index = self.ingredient_index.successor(relative_field_index);
         let data = Self::data(zalsa.table(), id);
 
         data.read_lock(zalsa.current_revision());

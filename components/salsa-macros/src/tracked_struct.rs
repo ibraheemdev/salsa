@@ -90,6 +90,7 @@ impl Macro {
 
         let field_indices = salsa_struct.field_indices();
         let tracked_indices = salsa_struct.tracked_indices();
+        let relative_tracked_indices = (0..tracked_indices.len()).collect::<Vec<_>>();
         let untracked_indices = salsa_struct.untracked_indices();
 
         let field_options = salsa_struct.field_options();
@@ -129,6 +130,7 @@ impl Macro {
                     untracked_tys: [#(#untracked_tys),*],
                     field_indices: [#(#field_indices),*],
                     tracked_indices: [#(#tracked_indices),*],
+                    relative_tracked_indices: [#(#relative_tracked_indices),*],
                     untracked_indices: [#(#untracked_indices),*],
                     field_options: [#(#field_options),*],
                     tracked_options: [#(#tracked_options),*],
