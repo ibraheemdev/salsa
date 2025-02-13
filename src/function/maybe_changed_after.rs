@@ -37,7 +37,6 @@ where
                         MaybeChangedAfter::No(memo.revisions.accumulated_inputs.load())
                     };
                 }
-                drop(memo_guard); // release the arc-swap guard before cold path
                 if let Some(mcs) = self.maybe_changed_after_cold(db, id, revision) {
                     return mcs;
                 } else {

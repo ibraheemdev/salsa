@@ -2,10 +2,10 @@ use std::any::Any;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::mem::ManuallyDrop;
-use std::sync::Arc;
 
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::revision::AtomicRevision;
+use crate::table::memo::MemoEntryData;
 use crate::table::memo::MemoTable;
 use crate::zalsa_local::QueryOrigin;
 use crate::{
@@ -16,20 +16,27 @@ use crate::{
 use super::{Configuration, IngredientImpl};
 
 #[allow(type_alias_bounds)]
-pub(super) type ArcMemo<'lt, C: Configuration> = Arc<Memo<<C as Configuration>::Output<'lt>>>;
+pub(super) type BoxMemo<'lt, C: Configuration> =
+    Box<MemoEntryData<Memo<<C as Configuration>::Output<'lt>>>>;
 
 impl<C: Configuration> IngredientImpl<C> {
     /// Memos have to be stored internally using `'static` as the database lifetime.
     /// This (unsafe) function call converts from something tied to self to static.
     /// Values transmuted this way have to be transmuted back to being tied to self
     /// when they are returned to the user.
-    unsafe fn to_static<'db>(&'db self, memo: ArcMemo<'db, C>) -> ArcMemo<'static, C> {
+    unsafe fn to_static<'db>(
+        &'db self,
+        memo: Box<MemoEntryData<Memo<C::Output<'db>>>>,
+    ) -> Box<MemoEntryData<Memo<C::Output<'static>>>> {
         unsafe { std::mem::transmute(memo) }
     }
 
     /// Convert from an internal memo (which uses `'static``) to one tied to self
     /// so it can be publicly released.
-    unsafe fn to_self<'db>(&'db self, memo: ArcMemo<'static, C>) -> ArcMemo<'db, C> {
+    unsafe fn to_self<'db>(
+        &'db self,
+        memo: Box<MemoEntryData<Memo<C::Output<'static>>>>,
+    ) -> Box<MemoEntryData<Memo<C::Output<'db>>>> {
         unsafe { std::mem::transmute(memo) }
     }
 
@@ -43,8 +50,8 @@ impl<C: Configuration> IngredientImpl<C> {
         &'db self,
         zalsa: &'db Zalsa,
         id: Id,
-        memo: ArcMemo<'db, C>,
-    ) -> Option<ManuallyDrop<ArcMemo<'db, C>>> {
+        memo: Box<MemoEntryData<Memo<C::Output<'db>>>>,
+    ) -> Option<ManuallyDrop<Box<MemoEntryData<Memo<C::Output<'db>>>>>> {
         let static_memo = unsafe { self.to_static(memo) };
         let old_static_memo = unsafe {
             zalsa
@@ -62,16 +69,18 @@ impl<C: Configuration> IngredientImpl<C> {
         &'db self,
         zalsa: &'db Zalsa,
         id: Id,
-    ) -> Option<ArcMemo<'db, C>> {
-        let static_memo = zalsa.memo_table_for(id).get(self.memo_ingredient_index)?;
-        unsafe { Some(self.to_self(static_memo)) }
+    ) -> Option<&'db Memo<C::Output<'db>>> {
+        let x: *const MemoEntryData<Memo<C::Output<'static>>> =
+            zalsa.memo_table_for(id).get(self.memo_ingredient_index)?;
+
+        unsafe { Some(std::mem::transmute(&raw const (*x).memo)) }
     }
 
     /// Evicts the existing memo for the given key, replacing it
     /// with an equivalent memo that has no value. If the memo is untracked, BaseInput,
     /// or has values assigned as output of another query, this has no effect.
     pub(super) fn evict_value_from_memo_for(&self, table: &mut MemoTable) {
-        let map = |memo: ArcMemo<'static, C>| -> ArcMemo<'static, C> {
+        let map = |memo: &mut Memo<C::Output<'_>>| {
             match &memo.revisions.origin {
                 QueryOrigin::Assigned(_)
                 | QueryOrigin::DerivedUntracked(_)
@@ -80,43 +89,15 @@ impl<C: Configuration> IngredientImpl<C> {
                     // assigned as output of another query
                     // or those with untracked inputs
                     // as their values cannot be reconstructed.
-                    memo
                 }
                 QueryOrigin::Derived(_) => {
-                    // Note that we cannot use `Arc::get_mut` here as the use of `ArcSwap` makes it
-                    // impossible to get unique access to the interior Arc
-                    // QueryRevisions: !Clone to discourage cloning, we need it here though
-                    let &QueryRevisions {
-                        changed_at,
-                        durability,
-                        ref origin,
-                        ref tracked_struct_ids,
-                        ref accumulated,
-                        ref accumulated_inputs,
-                    } = &memo.revisions;
-                    // Re-assemble the memo but with the value set to `None`
-                    Arc::new(Memo::new(
-                        None,
-                        memo.verified_at.load(),
-                        QueryRevisions {
-                            changed_at,
-                            durability,
-                            origin: origin.clone(),
-                            tracked_struct_ids: tracked_struct_ids.clone(),
-                            accumulated: accumulated.clone(),
-                            accumulated_inputs: accumulated_inputs.clone(),
-                        },
-                    ))
+                    // Set the memo value to `None`.
+                    memo.value = None;
                 }
             }
         };
-        // SAFETY: We queue the old value for deletion, delaying its drop until the next revision bump.
-        let old = unsafe { table.map_memo(self.memo_ingredient_index, map) };
-        if let Some(old) = old {
-            // In case there is a reference to the old memo out there, we have to store it
-            // in the deleted entries. This will get cleared when a new revision starts.
-            self.deleted_entries.push(ManuallyDrop::into_inner(old));
-        }
+
+        table.update_memo(self.memo_ingredient_index, map);
     }
 }
 

@@ -595,8 +595,8 @@ where
         let memo_table = unsafe { (*data).take_memo_table() };
         // SAFETY: We have verified that no more references to these memos exist and so we are good
         // to drop them.
-        for (memo_ingredient_index, memo) in unsafe { memo_table.into_memos() } {
-            let memo = ManuallyDrop::into_inner(memo);
+        for (memo_ingredient_index, memo_entry) in unsafe { memo_table.into_memos() } {
+            let memo = ManuallyDrop::into_inner(memo_entry);
             let ingredient_index =
                 zalsa.ingredient_index_for_memo(self.ingredient_index, memo_ingredient_index);
 
@@ -607,7 +607,7 @@ where
 
             db.salsa_event(&|| Event::new(EventKind::DidDiscard { key: executor }));
 
-            for stale_output in memo.origin().outputs() {
+            for stale_output in memo.memo.origin().outputs() {
                 stale_output.remove_stale_output(db, executor);
             }
         }
