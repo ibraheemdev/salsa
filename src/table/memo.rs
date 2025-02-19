@@ -139,6 +139,8 @@ impl MemoTable {
     ///
     /// The caller needs to make sure to not drop the returned value until no more references into
     /// the database exist as there may be outstanding borrows into the `Arc` contents.
+    #[cold]
+    #[inline(never)]
     unsafe fn create_entry_cold<M: Memo>(
         &self,
         memo_ingredient_index: MemoIngredientIndex,

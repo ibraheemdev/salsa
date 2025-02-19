@@ -16,7 +16,8 @@ dashmap = { version = "6", features = ["raw-api"] }
 hashlink = "0.9"
 hashbrown = "0.14.3"
 indexmap = "2"
-boxcar = { git = "https://github.com/ibraheemdev/boxcar", rev = "c0e18fd" }
+# boxcar = { git = "https://github.com/ibraheemdev/boxcar", rev = "c0e18fd" }
+boxcar = { path = "../../sync/boxcar" }
 tracing = "0.1"
 parking_lot = "0.12"
 rustc-hash = "2"
