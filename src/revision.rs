@@ -26,7 +26,8 @@ impl Revision {
     #[inline]
     pub(crate) const fn start() -> Self {
         Self {
-            generation: NonZeroUsize::new(START).unwrap(),
+            // SAFETY: `START` is non-zero.
+            generation: unsafe { NonZeroUsize::new_unchecked(START) },
         }
     }
 

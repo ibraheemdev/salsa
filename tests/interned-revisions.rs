@@ -214,3 +214,46 @@ fn test_reuse() {
             "WillExecute { database_key: function(Id(9)) }",
         ]"#]]);
 }
+
+#[test]
+fn test_reuse_interned_input() {
+    // A query that creates an interned value.
+    #[salsa::tracked]
+    fn create_interned<'db>(db: &'db dyn Database, input: Input) -> Interned<'db> {
+        Interned::new(db, input.field1(db))
+    }
+
+    #[salsa::tracked]
+    fn use_interned<'db>(db: &'db dyn Database, interned: Interned<'db>) -> usize {
+        let field = interned.field1(db);
+        field
+    }
+
+    let mut db = common::EventLoggerDatabase::default();
+    let input = Input::new(&db, 0);
+
+    // Create and use I0 in R0.
+    let interned = create_interned(&db, input);
+    let result = use_interned(&db, interned);
+    assert_eq!(result, 0);
+
+    // Create and use I1 in a number of revisions, marking I0 as stale.
+    input.set_field1(&mut db).to(1);
+    for _ in 0..10 {
+        let interned = create_interned(&db, input);
+        let result = use_interned(&db, interned);
+        assert_eq!(result, 1);
+
+        // Trigger a new revision.
+        input.set_field1(&mut db).to(1);
+    }
+
+    // Create I2, reusing the stale slot of I0.
+    input.set_field1(&mut db).to(2);
+    let interned = create_interned(&db, input);
+
+    // Use I2. The function should not be memoized with the value of I0, despite I2 and I0
+    // sharing the same slot.
+    let result = use_interned(&db, interned);
+    assert_eq!(result, 2);
+}
