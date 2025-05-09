@@ -341,7 +341,7 @@ where
                     .unwrap_or((Durability::MAX, Revision::max()));
 
                 let value = value.shared.get_mut().with(|value_shared| {
-                    // SAFETY: We hold the lock and the value has not been read in this revision.
+                    // SAFETY: We hold the lock.
                     let value_shared = unsafe { &mut *value_shared };
 
                     // Mark the slot as reused.
@@ -354,13 +354,31 @@ where
                     unsafe { &*UnsafeRef::into_raw(cursor.remove().unwrap()) }
                 });
 
-                // SAFETY: We hold the lock.
-                let id = value.shared.with_mut(|value_shared| unsafe {
+                let id = value.shared.with_mut(|value_shared| {
+                    // SAFETY: We hold the lock.
+                    let value_shared = unsafe { &mut *value_shared };
+
                     // Note we need to retain the previous durability here to ensure queries trying
                     // to read the old value are revalidated.
-                    (*value_shared).durability =
-                        std::cmp::max((*value_shared).durability, durability);
-                    (*value_shared).id
+                    value_shared.durability = std::cmp::max(value_shared.durability, durability);
+
+                    let index = self.database_key_index(value_shared.id);
+
+                    // Record a dependency on the value.
+                    zalsa_local.report_tracked_read_simple(
+                        index,
+                        value_shared.durability,
+                        value_shared.first_interned_at,
+                    );
+
+                    zalsa.event(&|| {
+                        Event::new(EventKind::DidReuseInternedValue {
+                            key: index,
+                            revision: current_revision,
+                        })
+                    });
+
+                    value_shared.id
                 });
 
                 // Reuse the value slot with the new data.
@@ -371,19 +389,14 @@ where
                     *fields = self.to_internal_data(assemble(id, key));
                 });
 
+                // TODO: Need to free the memory safely here.
+                value.memos.clear();
+
                 // Move the value to the front of the LRU list.
                 //
                 // SAFETY: The value pointer is valid for the lifetime of the database
                 // and only accessed mutably while holding the lock.
                 shared.lru.push_front(unsafe { UnsafeRef::from_raw(value) });
-
-                let index = self.database_key_index(id);
-                zalsa.event(&|| {
-                    Event::new(EventKind::DidReuseInternedValue {
-                        key: index,
-                        revision: current_revision,
-                    })
-                });
 
                 return id;
             }
