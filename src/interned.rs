@@ -499,22 +499,30 @@ where
     /// Rarely used since end-users generally carry a struct with a pointer directly
     /// to the interned item.
     pub fn data<'db>(&'db self, db: &'db dyn Database, id: Id) -> &'db C::Fields<'db> {
-        let zalsa = db.zalsa();
+        let (zalsa, zalsa_local) = db.zalsas();
         let value = zalsa.table().get::<Value<C>>(id);
 
-        debug_assert!(
-            {
-                let _shared = self.shared.lock();
+        {
+            let _shared = self.shared.lock();
 
+            value.shared.with(|value_shared| {
                 // SAFETY: We hold the lock.
-                value.shared.with(|value_shared| unsafe {
-                    let last_changed_revision =
-                        zalsa.last_changed_revision((*value_shared).durability);
-                    (*value_shared).last_interned_at >= last_changed_revision
-                })
-            },
-            "Data was not interned in the latest revision for its durability."
-        );
+                let value_shared = unsafe { &*value_shared };
+
+                zalsa_local.report_tracked_read_simple(
+                    self.database_key_index(id),
+                    value_shared.durability,
+                    value_shared.first_interned_at,
+                );
+
+                let last_changed_revision = zalsa.last_changed_revision(value_shared.durability);
+
+                debug_assert!(
+                    value_shared.last_interned_at >= last_changed_revision,
+                    "Data was not interned in the latest revision for its durability."
+                );
+            });
+        }
 
         // SAFETY: Interned values are only exposed if they have been validated in the
         // current revision, as checked by the assertion above, while ensures they are
