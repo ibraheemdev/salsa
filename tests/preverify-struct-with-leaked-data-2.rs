@@ -85,6 +85,7 @@ fn test_leaked_inputs_ignored() {
             "WillCheckCancellation",
             "DidValidateInternedValue { key: counter_field::interned_arguments(Id(800)), revision: R2 }",
             "WillCheckCancellation",
+            "DidValidateInternedValue { key: counter_field::interned_arguments(Id(800)), revision: R2 }",
             "WillExecute { database_key: counter_field(Id(800)) }",
             "WillExecute { database_key: function(Id(0)) }",
             "WillCheckCancellation",

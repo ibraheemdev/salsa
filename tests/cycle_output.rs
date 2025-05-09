@@ -149,20 +149,10 @@ fn revalidate_no_changes() {
     db.assert_logs(expect![[r#"
         [
             "salsa_event(DidSetCancellationFlag)",
-<<<<<<< HEAD
             "salsa_event(DidValidateMemoizedValue { database_key: read_value(Id(400)) })",
-            "salsa_event(DidReinternValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
-            "salsa_event(DidValidateMemoizedValue { database_key: query_d(Id(800)) })",
-            "salsa_event(DidValidateMemoizedValue { database_key: query_b(Id(0)) })",
-=======
-            "salsa_event(DidValidateMemoizedValue { database_key: read_value(Id(403)) })",
             "salsa_event(DidValidateInternedValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
             "salsa_event(DidValidateMemoizedValue { database_key: query_d(Id(800)) })",
             "salsa_event(DidValidateMemoizedValue { database_key: query_b(Id(0)) })",
-            "salsa_event(DidValidateInternedValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
-            "salsa_event(DidValidateMemoizedValue { database_key: query_a(Id(0)) })",
-            "salsa_event(DidValidateMemoizedValue { database_key: query_b(Id(0)) })",
->>>>>>> b54e365f (simple LRU garbage collection for interned values)
         ]"#]]);
 }
 
@@ -186,18 +176,14 @@ fn revalidate_with_change_after_output_read() {
     db.assert_logs(expect![[r#"
         [
             "salsa_event(DidSetCancellationFlag)",
-<<<<<<< HEAD
-=======
-            "salsa_event(DidValidateMemoizedValue { database_key: read_value(Id(403)) })",
-            "salsa_event(DidValidateInternedValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
-            "salsa_event(WillExecute { database_key: query_d(Id(800)) })",
-            "salsa_event(WillExecute { database_key: query_a(Id(0)) })",
->>>>>>> b54e365f (simple LRU garbage collection for interned values)
             "salsa_event(DidValidateMemoizedValue { database_key: read_value(Id(400)) })",
-            "salsa_event(DidReinternValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
+            "salsa_event(DidValidateInternedValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
+            "salsa_event(DidValidateInternedValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
             "salsa_event(WillExecute { database_key: query_b(Id(0)) })",
-            "salsa_event(DidReinternValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
+            "salsa_event(DidValidateInternedValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
+            "salsa_event(DidValidateInternedValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
             "salsa_event(WillExecute { database_key: query_a(Id(0)) })",
+            "salsa_event(DidValidateInternedValue { key: query_d::interned_arguments(Id(800)), revision: R2 })",
             "salsa_event(WillExecute { database_key: query_d(Id(800)) })",
             "salsa_event(WillDiscardStaleOutput { execute_key: query_a(Id(0)), output_key: Output(Id(403)) })",
             "salsa_event(DidDiscard { key: Output(Id(403)) })",
