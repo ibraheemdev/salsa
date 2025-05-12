@@ -265,6 +265,51 @@ fn test_reuse_interned_input() {
     assert_eq!(result, 2);
 }
 
+// fn get_input() -> { Input { interned: intern(1) } }
+// fn query(input1, input2) { if input2 { read(input1.interned) } }
+//
+// query(get_input(), intern(10));
+//
+// bump_revision();
+//
+// query(get_input(), intern(20));
+
+#[test]
+fn test_conditional_read() {
+    // A query that creates an interned value.
+    #[salsa::tracked]
+    fn create_nested_interned<'db>(db: &'db dyn Database) -> NestedInterned<'db> {
+        NestedInterned::new(db, Interned::new(db, 0))
+    }
+
+    #[salsa::tracked]
+    fn read_interned_if<'db>(
+        db: &'db dyn Database,
+        nested_interned: NestedInterned<'db>,
+        input: Input,
+    ) -> Option<usize> {
+        if input.field1(db) == 1 {
+            return Some(nested_interned.interned(db).field1(db));
+        }
+
+        None
+    }
+
+    let mut db = common::EventLoggerDatabase::default();
+    let input = Input::new(&db, 0);
+
+    // Create and use NI0, which wraps I0, in R0.
+    let nested_interned = create_nested_interned(&db);
+    let result = read_interned_if(&db, nested_interned, input);
+    assert_eq!(result, None);
+
+    input.set_field1(&mut db).to(1);
+
+    let nested_interned = create_nested_interned(&db);
+    let result = read_interned_if(&db, nested_interned, input);
+    assert_eq!(result, Some(0));
+}
+
 #[test]
 fn test_reuse_multiple_interned_input() {
     // A query that creates an interned value.

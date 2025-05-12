@@ -203,11 +203,11 @@ where
     }
 }
 
-// fn get_input() -> { Input { interned: intern(1) } }
+// fn get_input() -> { Input { interned: 1 } }
 // fn query(input1, input2) { if input2 { read(input1.interned) } }
 //
-// query(get_input(), intern(10));
+// let input1 = Input { interned: intern(1), other: intern(10) };
+// query(input1);
 //
-// bump_revision();
-//
-// query(get_input(), intern(20));
+// let input2 = Input { interned: input1.interned, other: intern(20) };
+// query(input2);

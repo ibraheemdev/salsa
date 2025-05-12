@@ -1,3 +1,29 @@
+// R19:
+//   EXECUTE      explicit_bases(Id(240f))
+//   EXECUTE      infer_deferred_types(Id(33f0))
+//   READ         GenericAlias(Id(7400))
+//   READ         Specialization(Id(6803)), last_interned_at: R19
+//
+// R25:
+//   REUSE        Specialization(Id(6803)), last_interned_at: R19->R25
+//
+// R31:
+//   DEEP-VERIFY  explicit_bases(Id(240f))
+//     DEEP-VERIFY  infer_deferred_types(Id(33f0))
+//         HAS-DEPENDENCY  GenericAlias(Id(7400))
+//         HAS-DEPENDENCY  Specialization(Id(6803))
+//
+//         CHANGED         Specialization(Id(6803)), last_interned_at: R25, since: R19
+//         RE-EXECUTE      infer_deferred_types(Id(33f0))
+//           READ            GenericAlias(Id(7402))
+//           (DOES NOT READ  GenericAlias(Id(7400)))
+//         UNCHANGED       infer_deferred_types(Id(33f0))
+//   VALIDATED    explicit_bases(Id(240f))
+//
+//   SHALLOW      explicit_bases(Id(240f))
+//   READ         GenericAlias(Id(7400)), last_interned_at: R19
+//   PANIC
+
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::cycle::{CycleHeadKind, CycleHeads, CycleRecoveryStrategy};
 use crate::function::memo::Memo;
@@ -11,6 +37,7 @@ use crate::zalsa_local::{QueryEdge, QueryOrigin};
 use crate::{AsDynDatabase as _, Id, Revision};
 
 /// Result of memo validation.
+#[derive(Debug)]
 pub enum VerifyResult {
     /// Memo has changed and needs to be recomputed.
     Changed,
@@ -137,8 +164,9 @@ where
         );
 
         // Check if the inputs are still valid. We can just compare `changed_at`.
+        dbg!("HERE");
         let deep_verify =
-            self.deep_verify_memo(db, zalsa, old_memo, database_key_index, cycle_heads);
+            dbg!(self.deep_verify_memo(db, zalsa, old_memo, database_key_index, cycle_heads));
         if let VerifyResult::Unchanged(accumulated_inputs) = deep_verify {
             return Some(if old_memo.revisions.changed_at > revision {
                 VerifyResult::Changed
@@ -162,14 +190,14 @@ where
             let memo = self.execute(db, active_query, Some(old_memo));
             let changed_at = memo.revisions.changed_at;
 
-            return Some(if changed_at > revision {
+            return Some(dbg!(if changed_at > revision {
                 VerifyResult::Changed
             } else {
                 VerifyResult::Unchanged(match &memo.revisions.accumulated {
                     Some(_) => InputAccumulatedValues::Any,
                     None => memo.revisions.accumulated_inputs.load(),
                 })
-            });
+            }));
         }
 
         // Otherwise, nothing for it: have to consider the value to have changed.
@@ -359,7 +387,7 @@ where
             return VerifyResult::unchanged();
         }
 
-        match &old_memo.revisions.origin {
+        match dbg!(&old_memo.revisions.origin) {
             QueryOrigin::Assigned(_) => {
                 // If the value was assigned by another query,
                 // and that query were up-to-date,
@@ -391,7 +419,7 @@ where
 
                 // If the value is from the same revision but is still provisional, consider it changed
                 // because we're now in a new iteration.
-                if can_shallow_update == ShallowUpdate::Verified && is_provisional {
+                if dbg!(can_shallow_update == ShallowUpdate::Verified && is_provisional) {
                     return VerifyResult::Changed;
                 }
 
@@ -404,9 +432,15 @@ where
                 // they executed. It's possible that if the value of some input I0 is no longer
                 // valid, then some later input I1 might never have executed at all, so verifying
                 // it is still up to date is meaningless.
+                eprintln!("{:?} ITERATING OVER DEPENDENCIES", database_key_index);
+
                 for &edge in edges.input_outputs.iter() {
                     match edge {
                         QueryEdge::Input(dependency_index) => {
+                            eprintln!(
+                                "{:?}-->{:?} ITERATING OVER DEPENDENCY",
+                                database_key_index, dependency_index
+                            );
                             match dependency_index.maybe_changed_after(
                                 dyn_db,
                                 zalsa,
@@ -440,6 +474,8 @@ where
                         }
                     }
                 }
+
+                eprintln!("{:?} DONE ITERATING OVER DEPENDENCIES", database_key_index);
 
                 // Possible scenarios here:
                 //

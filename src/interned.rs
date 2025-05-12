@@ -7,7 +7,6 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListLink, UnsafeRef};
-use parking_lot::Mutex;
 use rustc_hash::FxBuildHasher;
 
 use crate::cycle::CycleHeads;
@@ -16,10 +15,10 @@ use crate::function::VerifyResult;
 use crate::id::{AsId, FromId};
 use crate::ingredient::Ingredient;
 use crate::loom::cell::{Cell, UnsafeCell};
-use crate::loom::sync::Arc;
+use crate::loom::sync::{Arc, Mutex};
 use crate::plumbing::{IngredientIndices, Jar, ZalsaLocal};
 use crate::revision::AtomicRevision;
-use crate::table::memo::{MemoTable, MemoTableTypes};
+use crate::table::memo::{MemoTable, MemoTableTypes, MemoTableWithTypesMut};
 use crate::table::Slot;
 use crate::zalsa::{IngredientIndex, Zalsa};
 use crate::{Database, DatabaseKeyIndex, Event, EventKind, Id, Revision};
@@ -84,7 +83,7 @@ where
     C: Configuration,
 {
     /// Memos attached to this interned value.
-    memos: MemoTable,
+    memos: UnsafeCell<MemoTable>,
 
     /// An intrusive linked list for LRU.
     link: LinkedListLink,
@@ -103,13 +102,14 @@ where
 struct ValueShared {
     /// The interned ID for this value.
     ///
-    /// This is necessary to identify slots in the LRU list.
+    /// Storing this on the value itself is necessary to identify slots
+    /// from the LRU list.
     id: Id,
 
     /// The revision the value was first interned in.
     first_interned_at: Revision,
 
-    /// The most recent interned revision.
+    /// The revision the value was most-recently interned in.
     last_interned_at: Revision,
 
     /// The minimum durability of all inputs consumed by the creator
@@ -126,10 +126,10 @@ where
     /// Fields of this interned struct.
     #[cfg(feature = "salsa_unstable")]
     pub fn fields(&self) -> &C::Fields<'static> {
-        // SAFETY: The fact that this function is safe is technically unsound, but interned
-        // values are only exposed if they have been validated in the current revision, which
-        // ensures that they are not reused while being accessed.
-        &*self.fields.with(|fields| unsafe { &*fields })
+        // SAFETY: The fact that this function is safe makes this technically unsound, but
+        // interned values are only exposed if they have been validated in the current revision,
+        // which ensures that they are not reused while being accessed.
+        self.fields.with(|fields| unsafe { &*fields })
     }
 }
 
@@ -240,7 +240,6 @@ where
         let found_value = Cell::new(None);
         let eq = |id: &_| {
             let data = table.get::<Value<C>>(*id);
-
             found_value.set(Some(data));
 
             data.fields.with(|fields| {
@@ -269,7 +268,18 @@ where
 
                 // Validate the value in this revision to avoid reuse.
                 if value_shared.last_interned_at < current_revision {
+                    let prev_last_interned_at = value_shared.last_interned_at;
                     value_shared.last_interned_at = current_revision;
+
+                    tracing::warn!(
+                        "__{:?}__ interned_validate id: {:?}=={:?}, last_interned_at: {:?}->{:?}, first_interned_at: {:?}",
+                        C::DEBUG_NAME,
+                        id,
+                        value_shared.id,
+                        prev_last_interned_at,
+                        value_shared.last_interned_at,
+                        value_shared.first_interned_at,
+                    );
 
                     zalsa.event(&|| {
                         Event::new(EventKind::DidValidateInternedValue {
@@ -296,7 +306,7 @@ where
                         std::cmp::max(value_shared.durability, stamp.durability);
                 }
 
-                // Record a dependency on the value.
+                // Record a read dependency on the value.
                 zalsa_local.report_tracked_read_simple(
                     index,
                     value_shared.durability,
@@ -309,7 +319,7 @@ where
             return id;
         }
 
-        // Fill up the table for the first few revisions.
+        // Fill up the table for the first few revisions before trying to reuse slots.
         if !self.revision_queue.is_primed() {
             return self.intern_id_cold(
                 db,
@@ -323,12 +333,24 @@ where
 
         // Otherwise, try to reuse a stale slot.
         let mut cursor = shared.lru.back_mut();
-
         if let Some(value) = cursor.get() {
             let is_stale = value.shared.with(|value_shared| {
                 // SAFETY: We hold the lock.
-                let last_interned_at = unsafe { (*value_shared).last_interned_at };
-                self.revision_queue.is_stale(last_interned_at)
+                let value_shared = unsafe { &*value_shared };
+
+                // The value must not have been read in the current revision to be collected
+                // safely, but we also do not want to collect values that have been read recently.
+                let is_stale = self.revision_queue.is_stale(value_shared.last_interned_at);
+
+                // We can't collect higher durability values until we have a mutable reference to the database.
+                let is_low_durability = value_shared.durability == Durability::LOW;
+
+                is_stale
+                    && is_low_durability
+                    && matches!(
+                        C::DEBUG_NAME,
+                        "try_mro_::interned_arguments" | "Specialization"
+                    )
             });
 
             if is_stale {
@@ -337,16 +359,27 @@ where
                     .active_query()
                     .map(|(_, stamp)| (stamp.durability, current_revision))
                     // If there is no active query this durability does not actually matter.
-                    // `last_interned_at` needs to be `Revision::MAX`, see the intern_access_in_different_revision test.
+                    // `last_interned_at` needs to be `Revision::MAX`, see the `intern_access_in_different_revision` test.
                     .unwrap_or((Durability::MAX, Revision::max()));
 
                 let value = value.shared.get_mut().with(|value_shared| {
                     // SAFETY: We hold the lock.
                     let value_shared = unsafe { &mut *value_shared };
 
+                    tracing::warn!(
+                        "__{:?}__ interned_reuse id: {:?}, last_interned_at: {:?}->{:?}, first_interned_at: {:?}->{:?}",
+                        C::DEBUG_NAME,
+                        value_shared.id,
+                        value_shared.last_interned_at,
+                        last_interned_at,
+                        value_shared.first_interned_at,
+                        current_revision,
+                    );
+
                     // Mark the slot as reused.
                     value_shared.first_interned_at = current_revision;
                     value_shared.last_interned_at = last_interned_at;
+                    value_shared.durability = durability;
 
                     // Remove the value from the LRU list.
                     //
@@ -358,13 +391,8 @@ where
                     // SAFETY: We hold the lock.
                     let value_shared = unsafe { &mut *value_shared };
 
-                    // Note we need to retain the previous durability here to ensure queries trying
-                    // to read the old value are revalidated.
-                    value_shared.durability = std::cmp::max(value_shared.durability, durability);
-
+                    // Record a read dependency on the value.
                     let index = self.database_key_index(value_shared.id);
-
-                    // Record a dependency on the value.
                     zalsa_local.report_tracked_read_simple(
                         index,
                         value_shared.durability,
@@ -383,19 +411,56 @@ where
 
                 // Reuse the value slot with the new data.
                 //
-                // SAFETY: We hold the lock and marked the value as reused, so any readers in the
-                // current revision will see it is not valid.
+                // SAFETY: We hold the lock and ensured the value was not read in the current revision.
                 value.fields.with_mut(|fields| unsafe {
                     *fields = self.to_internal_data(assemble(id, key));
                 });
 
                 // TODO: Need to free the memory safely here.
-                value.memos.clear();
+                value.memos.with_mut(|memos| unsafe { (*memos).clear() });
+
+                // value.memos.with_mut(|memos| {
+                //     // SAFETY: TODO
+                //     let mut memo_table = unsafe { std::mem::take(&mut *memos) };
+
+                //     // SAFETY: We use the correct types table.
+                //     let table = unsafe { self.memo_table_types.attach_memos_mut(&mut memo_table) };
+                //     // `Database::salsa_event` is a user supplied callback which may panic
+                //     // in that case we need a drop guard to free the memo table
+                //     struct TableDropGuard<'a>(MemoTableWithTypesMut<'a>);
+                //     impl Drop for TableDropGuard<'_> {
+                //         fn drop(&mut self) {
+                //             // SAFETY: We have verified that no more references to these memos exist and so we are good
+                //             // to drop them.
+                //             unsafe { self.0.drop() };
+                //         }
+                //     }
+                //     let mut table_guard = TableDropGuard(table);
+                //     // SAFETY: We have verified that no more references to these memos exist and so we are good
+                //     // to drop them.
+                //     unsafe {
+                //         table_guard.0.take_memos(|memo_ingredient_index, memo| {
+                //             let ingredient_index = zalsa.ingredient_index_for_memo(
+                //                 self.ingredient_index,
+                //                 memo_ingredient_index,
+                //             );
+
+                //             let executor = DatabaseKeyIndex::new(ingredient_index, id);
+
+                //             zalsa.event(&|| Event::new(EventKind::DidDiscard { key: executor }));
+
+                //             for stale_output in memo.origin().outputs() {
+                //                 stale_output.remove_stale_output(zalsa, executor);
+                //             }
+                //         })
+                //     };
+                //     std::mem::forget(table_guard);
+                // });
 
                 // Move the value to the front of the LRU list.
                 //
-                // SAFETY: The value pointer is valid for the lifetime of the database
-                // and only accessed mutably while holding the lock.
+                // SAFETY: The value pointer is valid for the lifetime of the database and
+                // only accessed mutably while holding the lock.
                 shared.lru.push_front(unsafe { UnsafeRef::from_raw(value) });
 
                 return id;
@@ -436,12 +501,12 @@ where
             .active_query()
             .map(|(_, stamp)| (stamp.durability, current_revision))
             // If there is no active query this durability does not actually matter.
-            // `last_interned_at` needs to be `Revision::MAX`, see the intern_access_in_different_revision test.
+            // `last_interned_at` needs to be `Revision::MAX`, see the `intern_access_in_different_revision` test.
             .unwrap_or((Durability::MAX, Revision::max()));
 
         // Allocate the value slot.
         let id = zalsa_local.allocate(zalsa, self.ingredient_index, |id| Value::<C> {
-            memos: Default::default(),
+            memos: UnsafeCell::new(Default::default()),
             link: LinkedListLink::new(),
             fields: UnsafeCell::new(unsafe { self.to_internal_data(assemble(id, key)) }),
             shared: UnsafeCell::new(ValueShared {
@@ -474,7 +539,6 @@ where
         };
 
         shared.key_map.insert_unique(data_hash, id, hasher);
-
         debug_assert_eq!(data_hash, {
             let value = zalsa.table().get::<Value<C>>(id);
 
@@ -486,10 +550,22 @@ where
 
         let index = self.database_key_index(id);
 
-        // SAFETY: We hold the lock.
         value.shared.with_mut(|value_shared| {
-            // Record a dependency on this value.
-            let first_interned_at = unsafe { (*value_shared).first_interned_at };
+            let value_shared = unsafe { &*value_shared };
+            // Record a read dependency on this value.
+            //
+            // SAFETY: We hold the lock.
+            let first_interned_at = value_shared.first_interned_at;
+
+            tracing::warn!(
+                "__{:?}__ interned_new id: {:?}=={:?}, last_interned_at: {:?}, first_interned_at: {:?}",
+                C::DEBUG_NAME,
+                id,
+                value_shared.id,
+                value_shared.last_interned_at,
+                value_shared.first_interned_at,
+            );
+
             zalsa_local.report_tracked_read_simple(index, durability, first_interned_at);
         });
 
@@ -522,6 +598,10 @@ where
                 // SAFETY: We hold the lock.
                 let value_shared = unsafe { &*value_shared };
 
+                // Record a read dependency on the value.
+                //
+                // This is necessary as interned slots may be reused, in which case any queries
+                // that created or read from the previous value need to be revalidated.
                 zalsa_local.report_tracked_read_simple(
                     self.database_key_index(id),
                     value_shared.durability,
@@ -529,7 +609,19 @@ where
                 );
 
                 let last_changed_revision = zalsa.last_changed_revision(value_shared.durability);
+                if value_shared.last_interned_at<last_changed_revision {
+            tracing::warn!(
+                "__{:?}__ data id: {:?}, last_interned_at: {:?}, first_interned_at: {:?}, last_changed_revision: {:?}, current_revision: {:?}",
+                C::DEBUG_NAME,
+                id,
+                value_shared.last_interned_at,
+                value_shared.first_interned_at,
+                last_changed_revision,
+                zalsa.current_revision()
+            );
 
+        eprintln!("HERES {}", std::backtrace::Backtrace::capture());
+                }
                 debug_assert!(
                     value_shared.last_interned_at >= last_changed_revision,
                     "Data was not interned in the latest revision for its durability."
@@ -538,7 +630,7 @@ where
         }
 
         // SAFETY: Interned values are only exposed if they have been validated in the
-        // current revision, as checked by the assertion above, while ensures they are
+        // current revision, as checked by the assertion above, which ensures they are
         // not reused while being accessed.
         value
             .fields
@@ -546,7 +638,6 @@ where
     }
 
     /// Lookup the fields from an interned struct.
-    /// Note that this is not "leaking" since no dependency edge is required.
     pub fn fields<'db>(&'db self, db: &'db dyn Database, s: C::Struct<'db>) -> &'db C::Fields<'db> {
         self.data(db, AsId::as_id(&s))
     }
@@ -595,20 +686,45 @@ where
         self.revision_queue.record(current_revision);
 
         let _lock = self.shared.lock();
+        value.shared.with_mut(|value_shared| {
+            // SAFETY: We hold the lock.
+            let value_shared = unsafe { &mut *value_shared };
 
-        // SAFETY: We hold the lock.
-        value.shared.with_mut(|value_shared| unsafe {
+            tracing::warn!(
+                "__{:?}__ maybe_changed_after id: {:?}, last_interned_at: {:?}, first_interned_at: {:?}, since: {:?}, current_revision: {:?}",
+                C::DEBUG_NAME,
+                input,
+                value_shared.last_interned_at,
+                value_shared.first_interned_at,
+                revision,
+                current_revision
+            );
+
+            // Validate the value for the current revision to avoid reuse.
+            //
+            // If the value was reused, we may re-execute a query in which the value will
+            // be read.
+            //
+            // TODO: do we need this if it was changed?
+            value_shared.last_interned_at = current_revision;
+
             // The slot was reused.
-            if (*value_shared).first_interned_at > revision {
+            if value_shared.first_interned_at > revision {
                 return VerifyResult::Changed;
             }
 
-            // Validate the value for the current revision to avoid reuse.
-            (*value_shared).last_interned_at = current_revision;
+            tracing::warn!(
+                "__{:?}__ maybe_changed_after2 id: {:?}, last_interned_at: {:?}, first_interned_at: {:?}, since: {:?}, current_revision: {:?}",
+                C::DEBUG_NAME,
+                input,
+                value_shared.last_interned_at,
+                value_shared.first_interned_at,
+                revision,
+                current_revision
+            );
 
+            let index = self.database_key_index(input);
             zalsa.event(&|| {
-                let index = self.database_key_index(input);
-
                 Event::new(EventKind::DidValidateInternedValue {
                     key: index,
                     revision: current_revision,
@@ -645,16 +761,18 @@ where
 {
     #[inline(always)]
     unsafe fn memos(&self, _current_revision: Revision) -> &MemoTable {
-        &self.memos
+        // SAFETY: TODO
+        self.memos.with(|memos| unsafe { &*memos })
     }
 
     #[inline(always)]
     fn memos_mut(&mut self) -> &mut MemoTable {
-        &mut self.memos
+        // SAFETY: TODO
+        self.memos.with_mut(|memos| unsafe { &mut *memos })
     }
 }
 
-const REVS: usize = 3;
+const REVS: usize = 2;
 
 /// Keep track of revisions in which interned values were read, to determine staleness.
 ///
