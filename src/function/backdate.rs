@@ -31,9 +31,10 @@ where
             // used to be, that is a "breaking change" that our
             // consumers must be aware of. Becoming *more* durable
             // is not. See the test `durable_to_less_durable`.
-            if revisions.durability >= old_memo.revisions.durability
-                && C::values_equal(old_value, value)
-            {
+            if dbg!(
+                revisions.durability >= old_memo.revisions.durability
+                    && C::values_equal(old_value, value)
+            ) {
                 tracing::debug!(
                     "{index:?} value is equal, back-dating to {:?}",
                     old_memo.revisions.changed_at,

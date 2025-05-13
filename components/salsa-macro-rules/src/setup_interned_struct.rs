@@ -90,7 +90,7 @@ macro_rules! setup_interned_struct {
 
             /// Key to use during hash lookups. Each field is some type that implements `Lookup<T>`
             /// for the owned type. This permits interning with an `&str` when a `String` is required and so forth.
-            #[derive(Hash)]
+            #[derive(Hash, Debug)]
             struct StructKey<$db_lt, $($indexed_ty),*>(
                 $($indexed_ty,)*
                 std::marker::PhantomData<&$db_lt ()>,
@@ -208,6 +208,7 @@ macro_rules! setup_interned_struct {
                     $Db: ?Sized + salsa::Database,
                     $(
                         $field_ty: $zalsa::interned::HashEqLike<$indexed_ty>,
+                        $indexed_ty: std::fmt::Debug,
                     )*
                 {
                     eprintln!("{}", std::backtrace::Backtrace::capture());
@@ -238,6 +239,7 @@ macro_rules! setup_interned_struct {
                         $(
                             let f = f.field(stringify!($field_id), &fields.$field_index);
                         )*
+                            let f = f.field("___salsa___id", &$zalsa::AsId::as_id(&this));
                         f.finish()
                     }).unwrap_or_else(|| {
                         f.debug_tuple(stringify!($Struct))

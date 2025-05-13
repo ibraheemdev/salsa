@@ -35,8 +35,8 @@ pub trait Configuration: Sized + 'static {
     type Struct<'db>: Copy + FromId + AsId;
 }
 
-pub trait InternedData: Sized + Eq + Hash + Clone + Sync + Send {}
-impl<T: Eq + Hash + Clone + Sync + Send> InternedData for T {}
+pub trait InternedData: Sized + Eq + Hash + Clone + Sync + Send + std::fmt::Debug {}
+impl<T: Eq + Hash + Clone + Sync + Send + std::fmt::Debug> InternedData for T {}
 
 pub struct JarImpl<C: Configuration> {
     phantom: PhantomData<C>,
@@ -197,7 +197,7 @@ where
         assemble: impl FnOnce(Id, Key) -> C::Fields<'db>,
     ) -> C::Struct<'db>
     where
-        Key: Hash,
+        Key: Hash + std::fmt::Debug,
         C::Fields<'db>: HashEqLike<Key>,
     {
         FromId::from_id(self.intern_id(db, key, assemble))
@@ -219,7 +219,7 @@ where
         assemble: impl FnOnce(Id, Key) -> C::Fields<'db>,
     ) -> crate::Id
     where
-        Key: Hash,
+        Key: Hash + std::fmt::Debug,
         // We'd want the following predicate, but this currently implies `'static` due to a rustc
         // bug
         // for<'db> C::Data<'db>: HashEqLike<Key>,
@@ -233,12 +233,15 @@ where
         // Record the current revision as active.
         self.revision_queue.record(current_revision);
 
-        let data_hash = self.hasher.hash_one(&key);
+        let data_hash = dbg!(self.hasher.hash_one(&key));
+        dbg!(&key);
 
         let mut shared = self.shared.lock();
 
         let found_value = Cell::new(None);
         let eq = |id: &_| {
+            dbg!(id);
+
             let data = table.get::<Value<C>>(*id);
             found_value.set(Some(data));
 
@@ -249,13 +252,16 @@ where
                 // SAFETY: it's safe to go from Data<'static> to Data<'db>
                 // shrink lifetime here to use a single lifetime in Lookup::eq(&StructKey<'db>, &C::Data<'db>)
                 let data = unsafe { Self::from_internal_data(fields) };
+                dbg!(&data);
 
-                HashEqLike::eq(data, &key)
+                dbg!(HashEqLike::eq(data, &key))
             })
         };
 
+        dbg!(&shared.key_map);
+
         // Attempt a fast-path lookup of already interned data.
-        if let Some(&id) = shared.key_map.find(data_hash, eq) {
+        if let Some(&id) = dbg!(shared.key_map.find(data_hash, eq)) {
             let value = found_value
                 .get()
                 .expect("found the interned, so `found_value` should be set");
@@ -272,13 +278,14 @@ where
                     value_shared.last_interned_at = current_revision;
 
                     tracing::warn!(
-                        "__{:?}__ interned_validate id: {:?}=={:?}, last_interned_at: {:?}->{:?}, first_interned_at: {:?}",
+                        "__{:?}__ interned_validate id: {:?}=={:?}, last_interned_at: {:?}->{:?}, first_interned_at: {:?} fields: {:?}",
                         C::DEBUG_NAME,
                         id,
                         value_shared.id,
                         prev_last_interned_at,
                         value_shared.last_interned_at,
                         value_shared.first_interned_at,
+                        value.fields()
                     );
 
                     zalsa.event(&|| {
@@ -362,18 +369,21 @@ where
                     // `last_interned_at` needs to be `Revision::MAX`, see the `intern_access_in_different_revision` test.
                     .unwrap_or((Durability::MAX, Revision::max()));
 
-                let value = value.shared.get_mut().with(|value_shared| {
+                let (value, the_fields) = value.shared.get_mut().with(|value_shared| {
                     // SAFETY: We hold the lock.
                     let value_shared = unsafe { &mut *value_shared };
 
+                    let fields = unsafe { self.to_internal_data(assemble(value_shared.id, key)) };
+
                     tracing::warn!(
-                        "__{:?}__ interned_reuse id: {:?}, last_interned_at: {:?}->{:?}, first_interned_at: {:?}->{:?}",
+                        "__{:?}__ interned_reuse id: {:?}, last_interned_at: {:?}->{:?}, first_interned_at: {:?}->{:?} new_fields: {:?}",
                         C::DEBUG_NAME,
                         value_shared.id,
                         value_shared.last_interned_at,
                         last_interned_at,
                         value_shared.first_interned_at,
                         current_revision,
+                        fields
                     );
 
                     // Mark the slot as reused.
@@ -384,7 +394,7 @@ where
                     // Remove the value from the LRU list.
                     //
                     // SAFETY: The value pointer is valid for the lifetime of the database.
-                    unsafe { &*UnsafeRef::into_raw(cursor.remove().unwrap()) }
+                    (unsafe { &*UnsafeRef::into_raw(cursor.remove().unwrap()) }, fields)
                 });
 
                 let id = value.shared.with_mut(|value_shared| {
@@ -396,7 +406,7 @@ where
                     zalsa_local.report_tracked_read_simple(
                         index,
                         value_shared.durability,
-                        value_shared.first_interned_at,
+                        current_revision,
                     );
 
                     zalsa.event(&|| {
@@ -413,7 +423,7 @@ where
                 //
                 // SAFETY: We hold the lock and ensured the value was not read in the current revision.
                 value.fields.with_mut(|fields| unsafe {
-                    *fields = self.to_internal_data(assemble(id, key));
+                    *fields = the_fields;
                 });
 
                 // TODO: Need to free the memory safely here.
@@ -468,14 +478,16 @@ where
         }
 
         // If we could not find any stale slots, we are forced to allocate a new one.
-        self.intern_id_cold(
+        let id = self.intern_id_cold(
             db,
             key,
             (zalsa, zalsa_local),
             assemble,
             &mut *shared,
             data_hash,
-        )
+        );
+
+        id
     }
 
     /// The cold path for interning a value, allocating a new slot.
@@ -551,23 +563,29 @@ where
         let index = self.database_key_index(id);
 
         value.shared.with_mut(|value_shared| {
-            let value_shared = unsafe { &*value_shared };
-            // Record a read dependency on this value.
-            //
             // SAFETY: We hold the lock.
-            let first_interned_at = value_shared.first_interned_at;
+            let value_shared = unsafe { &*value_shared };
 
             tracing::warn!(
-                "__{:?}__ interned_new id: {:?}=={:?}, last_interned_at: {:?}, first_interned_at: {:?}",
+                "__{:?}__ interned_new id: {:?}=={:?}, last_interned_at: {:?}, first_interned_at: {:?} fields: {:?}",
                 C::DEBUG_NAME,
-                id,
+                id.as_u32(),
                 value_shared.id,
                 value_shared.last_interned_at,
                 value_shared.first_interned_at,
+                value.fields()
             );
 
-            zalsa_local.report_tracked_read_simple(index, durability, first_interned_at);
+
+            if id.as_u32() == 26629 {
+                dbg!("HERE");
+                let data = zalsa.table().get::<Value<C>>(unsafe { Id::from_u32(26627) });
+                println!("{:?} == {:?}", data.fields(), value.fields());
+                dbg!(data.fields() == value.fields());
+            }
         });
+
+        zalsa_local.report_tracked_read_simple(index, durability, current_revision);
 
         zalsa.event(&|| {
             Event::new(EventKind::DidInternValue {

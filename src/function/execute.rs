@@ -94,6 +94,7 @@ where
             ),
         };
 
+        eprintln!("OLD VALUE {:?}", opt_old_memo.is_some());
         if let Some(old_memo) = opt_old_memo {
             // If the new value is equal to the old one, then it didn't
             // really change, even if some of its inputs have. So we can
@@ -105,12 +106,17 @@ where
             // outputs and update the tracked struct IDs for seeding the next revision.
             self.diff_outputs(zalsa, database_key_index, old_memo, &mut revisions);
         }
-        self.insert_memo(
+
+        let memo = self.insert_memo(
             zalsa,
             id,
-            Memo::new(Some(new_value), zalsa.current_revision(), revisions),
+            Memo::new(Some(new_value), dbg!(zalsa.current_revision()), revisions),
             memo_ingredient_index,
-        )
+        );
+
+        dbg!(memo.revisions.changed_at);
+
+        memo
     }
 
     #[inline]

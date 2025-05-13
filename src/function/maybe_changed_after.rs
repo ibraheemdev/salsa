@@ -188,9 +188,9 @@ where
         if old_memo.value.is_some() && cycle_heads.is_empty() {
             let active_query = db.zalsa_local().push_query(database_key_index, 0);
             let memo = self.execute(db, active_query, Some(old_memo));
-            let changed_at = memo.revisions.changed_at;
+            let changed_at = dbg!(memo.revisions.changed_at);
 
-            return Some(dbg!(if changed_at > revision {
+            return Some(dbg!(if changed_at > dbg!(revision) {
                 VerifyResult::Changed
             } else {
                 VerifyResult::Unchanged(match &memo.revisions.accumulated {
