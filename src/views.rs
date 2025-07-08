@@ -13,6 +13,7 @@ pub struct Views {
     view_casters: boxcar::Vec<ViewCaster>,
 }
 
+#[derive(Copy, Clone)]
 struct ViewCaster {
     /// The id of the target type `dyn DbView` that we can cast to.
     target_type_id: TypeId,
@@ -80,16 +81,22 @@ impl Views {
     }
 
     /// Add a new downcaster from `dyn Database` to `dyn DbView`.
-    pub fn add<DbView: ?Sized + Any>(&self, func: DatabaseDownCasterSig<DbView>) {
-        let target_type_id = TypeId::of::<DbView>();
-        if self
-            .view_casters
-            .iter()
-            .any(|(_, u)| u.target_type_id == target_type_id)
-        {
-            return;
+    pub fn add<DbView: ?Sized + Any>(
+        &self,
+        func: DatabaseDownCasterSig<DbView>,
+    ) -> DatabaseDownCaster<DbView> {
+        if let Some(view) = self.try_downcaster_for() {
+            return view;
         }
-        self.view_casters.push(ViewCaster::new::<DbView>(func));
+
+        let view = ViewCaster::new::<DbView>(func);
+        self.view_casters.push(view);
+
+        DatabaseDownCaster(self.source_type_id, unsafe {
+            std::mem::transmute::<ErasedDatabaseDownCasterSig, DatabaseDownCasterSig<DbView>>(
+                view.cast,
+            )
+        })
     }
 
     /// Retrieve an downcaster function from `dyn Database` to `dyn DbView`.
@@ -98,23 +105,31 @@ impl Views {
     ///
     /// If the underlying type of `db` is not the same as the database type this upcasts was created for.
     pub fn downcaster_for<DbView: ?Sized + Any>(&self) -> DatabaseDownCaster<DbView> {
+        self.try_downcaster_for().unwrap_or_else(|| {
+            panic!(
+                "No downcaster registered for type `{}` in `Views`",
+                std::any::type_name::<DbView>(),
+            )
+        })
+    }
+
+    /// Retrieve an downcaster function from `dyn Database` to `dyn DbView`,
+    /// if it exists.
+    pub fn try_downcaster_for<DbView: ?Sized + Any>(&self) -> Option<DatabaseDownCaster<DbView>> {
         let view_type_id = TypeId::of::<DbView>();
-        for (_idx, view) in self.view_casters.iter() {
+        for (_, view) in self.view_casters.iter() {
             if view.target_type_id == view_type_id {
                 // SAFETY: We are unerasing the type erased function pointer having made sure the
                 // TypeId matches.
-                return DatabaseDownCaster(self.source_type_id, unsafe {
+                return Some(DatabaseDownCaster(self.source_type_id, unsafe {
                     std::mem::transmute::<ErasedDatabaseDownCasterSig, DatabaseDownCasterSig<DbView>>(
                         view.cast,
                     )
-                });
+                }));
             }
         }
 
-        panic!(
-            "No downcaster registered for type `{}` in `Views`",
-            std::any::type_name::<DbView>(),
-        );
+        None
     }
 }
 
