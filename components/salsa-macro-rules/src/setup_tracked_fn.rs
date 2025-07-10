@@ -80,80 +80,46 @@ macro_rules! setup_tracked_fn {
             $inner:ident,
         ]
     ) => {
-        // Suppress this clippy lint because we sometimes require `'db` where the ordinary Rust rules would not.
-        #[allow(clippy::needless_lifetimes)]
-        $(#[$attr])*
-        $vis fn $fn_name<$db_lt>(
-            $db: &$db_lt dyn $Db,
-            $($input_id: $input_ty,)*
-        ) -> salsa::plumbing::return_mode_ty!(($return_mode, __, __), $db_lt, $output_ty) {
+        #[doc(hidden)]
+        #[allow(unused)]
+        $vis struct $Configuration;
+
+        #[doc(hidden)]
+        #[allow(unused)]
+        static $FN_CACHE: salsa::plumbing::IngredientCache<salsa::plumbing::function::IngredientImpl<$Configuration>> =
+            salsa::plumbing::IngredientCache::new();
+
+        salsa::plumbing::macro_if! {
+            if $needs_interner {
+                #[derive(Copy, Clone)]
+                #[doc(hidden)]
+                #[allow(unused)]
+                $vis struct $InternedData<$db_lt>(
+                    salsa::Id,
+                    std::marker::PhantomData<fn() -> &$db_lt ()>,
+                );
+
+                #[doc(hidden)]
+                #[allow(unused)]
+                static $INTERN_CACHE: salsa::plumbing::GlobalIngredientCache<salsa::plumbing::interned::IngredientImpl<$Configuration>> =
+                    salsa::plumbing::GlobalIngredientCache::new();
+            } else {
+                $vis type $InternedData<$db_lt> = ($($interned_input_ty),*);
+            }
+        }
+
+        #[allow(dead_code)]
+        #[allow(clippy::all)]
+        const _: () = {
             use salsa::plumbing as $zalsa;
 
-            struct $Configuration;
-
-            $zalsa::submit! {
-                $zalsa::ErasedJar::erase::<$Configuration>($zalsa::ErasedJarKind::TrackedFn)
+            impl $zalsa::HasJar for $fn_name {
+                type Jar = $Configuration;
+                const KIND: $zalsa::JarKind = $zalsa::JarKind::TrackedFn;
             }
 
-            static $FN_CACHE: $zalsa::IngredientCache<$zalsa::function::IngredientImpl<$Configuration>> =
-                $zalsa::IngredientCache::new();
-
-            $zalsa::macro_if! {
-                if $needs_interner {
-                    #[derive(Copy, Clone)]
-                    struct $InternedData<$db_lt>(
-                        salsa::Id,
-                        std::marker::PhantomData<fn() -> &$db_lt ()>,
-                    );
-
-                    static $INTERN_CACHE: $zalsa::GlobalIngredientCache<$zalsa::interned::IngredientImpl<$Configuration>> =
-                        $zalsa::GlobalIngredientCache::new();
-
-                    impl $zalsa::SalsaStructInDb for $InternedData<'_> {
-                        type MemoIngredientMap = $zalsa::MemoIngredientSingletonIndex;
-
-                        fn lookup_ingredient_index(aux: &$zalsa::Zalsa) -> $zalsa::IngredientIndices {
-                            $zalsa::IngredientIndices::empty()
-                        }
-
-                        #[inline]
-                        fn cast(id: $zalsa::Id, type_id: ::core::any::TypeId) -> Option<Self> {
-                            if type_id == ::core::any::TypeId::of::<$InternedData>() {
-                                Some($InternedData(id, ::core::marker::PhantomData))
-                            } else {
-                                None
-                            }
-                        }
-                    }
-
-                    impl $zalsa::AsId for $InternedData<'_> {
-                        #[inline]
-                        fn as_id(&self) -> salsa::Id {
-                            self.0
-                        }
-                    }
-
-                    impl $zalsa::FromId for $InternedData<'_> {
-                        #[inline]
-                        fn from_id(id: salsa::Id) -> Self {
-                            Self(id, ::core::marker::PhantomData)
-                        }
-                    }
-
-                    impl $zalsa::interned::Configuration for $Configuration {
-                        const LOCATION: $zalsa::Location = $zalsa::Location {
-                            file: file!(),
-                            line: line!(),
-                        };
-                        const DEBUG_NAME: &'static str = concat!($(stringify!($self_ty), "::",)? stringify!($fn_name), "::interned_arguments");
-
-                        type Fields<$db_lt> = ($($interned_input_ty),*);
-
-                        type Struct<$db_lt> = $InternedData<$db_lt>;
-                    }
-                } else {
-                    type $InternedData<$db_lt> = ($($interned_input_ty),*);
-                }
+            $zalsa::register_jar! {
+                $zalsa::ErasedJar::erase::<$fn_name>()
             }
 
             impl $Configuration {
@@ -319,6 +285,62 @@ macro_rules! setup_tracked_fn {
                 }
             }
 
+
+            $zalsa::macro_if! { $needs_interner =>
+                impl $zalsa::interned::Configuration for $Configuration {
+                    const LOCATION: $zalsa::Location = $zalsa::Location {
+                        file: file!(),
+                        line: line!(),
+                    };
+                    const DEBUG_NAME: &'static str = concat!($(stringify!($self_ty), "::",)? stringify!($fn_name), "::interned_arguments");
+
+                    type Fields<$db_lt> = ($($interned_input_ty),*);
+
+                    type Struct<$db_lt> = $InternedData<$db_lt>;
+                }
+
+                impl salsa::plumbing::SalsaStructInDb for $InternedData<'_> {
+                    type MemoIngredientMap = salsa::plumbing::MemoIngredientSingletonIndex;
+
+                    fn lookup_ingredient_index(aux: &salsa::plumbing::Zalsa) -> salsa::plumbing::IngredientIndices {
+                        salsa::plumbing::IngredientIndices::empty()
+                    }
+
+                    #[inline]
+                    fn cast(id: salsa::plumbing::Id, type_id: ::core::any::TypeId) -> Option<Self> {
+                        if type_id == ::core::any::TypeId::of::<$InternedData>() {
+                            Some($InternedData(id, ::core::marker::PhantomData))
+                        } else {
+                            None
+                        }
+                    }
+                }
+
+                impl salsa::plumbing::AsId for $InternedData<'_> {
+                    #[inline]
+                    fn as_id(&self) -> salsa::Id {
+                        self.0
+                    }
+                }
+
+                impl salsa::plumbing::FromId for $InternedData<'_> {
+                    #[inline]
+                    fn from_id(id: salsa::Id) -> Self {
+                        Self(id, ::core::marker::PhantomData)
+                    }
+                }
+            }
+        };
+
+        // Suppress this clippy lint because we sometimes require `'db` where the ordinary Rust rules would not.
+        #[allow(clippy::needless_lifetimes)]
+        $(#[$attr])*
+        $vis fn $fn_name<$db_lt>(
+            $db: &$db_lt dyn $Db,
+            $($input_id: $input_ty,)*
+        ) -> salsa::plumbing::return_mode_ty!(($return_mode, __, __), $db_lt, $output_ty) {
+            use salsa::plumbing as $zalsa;
+
             #[allow(non_local_definitions)]
             impl $fn_name {
                 pub fn accumulated<$db_lt, A: salsa::Accumulator>(
@@ -381,6 +403,7 @@ macro_rules! setup_tracked_fn {
                 $zalsa::return_mode_expression!(($return_mode, __, __), $output_ty, result,)
             })
         }
+
         // The struct needs be last in the macro expansion in order to make the tracked
         // function's ident be identified as a function, not a struct, during semantic highlighting.
         // for more details, see https://github.com/salsa-rs/salsa/pull/612.
