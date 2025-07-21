@@ -31,7 +31,7 @@ macro_rules! event {
             #[cold] #[inline(never)] || { ::tracing::event!(::tracing::Level::$level, $($x)*) }
         };
 
-        if ::tracing::enabled!(::tracing::Level::$level) {
+        if ::tracing::Level::$level <= ::tracing::level_filters::LevelFilter::current() {
             event();
         }
     }};
@@ -43,7 +43,7 @@ macro_rules! span {
             #[cold] #[inline(never)] || { ::tracing::span!(::tracing::Level::$level, $($x)*) }
         };
 
-        if ::tracing::enabled!(::tracing::Level::$level) {
+        if ::tracing::Level::$level <= ::tracing::level_filters::LevelFilter::current() {
             span()
         } else {
             ::tracing::Span::none()
