@@ -59,26 +59,32 @@ fn everything() {
           "ingredients": {
             "0": {
               "1": {
-                "durabilities": [
-                  "Low"
-                ],
-                "revisions": [
-                  1
-                ],
-                "fields": [
-                  1
-                ]
+                "inner": {
+                  "durabilities": [
+                    "Low"
+                  ],
+                  "revisions": [
+                    1
+                  ],
+                  "fields": [
+                    1
+                  ]
+                },
+                "memos": {}
               },
               "2": {
-                "durabilities": [
-                  "Low"
-                ],
-                "revisions": [
-                  1
-                ],
-                "fields": [
-                  2
-                ]
+                "inner": {
+                  "durabilities": [
+                    "Low"
+                  ],
+                  "revisions": [
+                    1
+                  ],
+                  "fields": [
+                    2
+                  ]
+                },
+                "memos": {}
               }
             }
           }
@@ -108,168 +114,189 @@ fn everything() {
           "ingredients": {
             "0": {
               "1": {
-                "durabilities": [
-                  "Low"
-                ],
-                "revisions": [
-                  1
-                ],
-                "fields": [
-                  1
-                ]
+                "inner": {
+                  "durabilities": [
+                    "Low"
+                  ],
+                  "revisions": [
+                    1
+                  ],
+                  "fields": [
+                    1
+                  ]
+                },
+                "memos": {}
               },
               "2": {
-                "durabilities": [
-                  "Low"
-                ],
-                "revisions": [
-                  1
-                ],
-                "fields": [
-                  2
-                ]
+                "inner": {
+                  "durabilities": [
+                    "Low"
+                  ],
+                  "revisions": [
+                    1
+                  ],
+                  "fields": [
+                    2
+                  ]
+                },
+                "memos": {}
               },
               "3": {
-                "durabilities": [
-                  "Low"
-                ],
-                "revisions": [
-                  1
-                ],
-                "fields": [
-                  1
-                ]
+                "inner": {
+                  "durabilities": [
+                    "Low"
+                  ],
+                  "revisions": [
+                    1
+                  ],
+                  "fields": [
+                    1
+                  ]
+                },
+                "memos": {
+                  "0": {
+                    "value": 3073,
+                    "verified_at": 1,
+                    "revisions": {
+                      "changed_at": 1,
+                      "durability": "Low",
+                      "origin": {
+                        "Derived": [
+                          {
+                            "key": {
+                              "key_index": 3,
+                              "ingredient_index": 1
+                            }
+                          }
+                        ]
+                      },
+                      "verified_final": true,
+                      "extra": {
+                        "tracked_struct_ids": [
+                          [
+                            {
+                              "ingredient_index": 3,
+                              "hash": 6073466998405137972,
+                              "disambiguator": 0
+                            },
+                            3073
+                          ]
+                        ],
+                        "cycle_heads": [],
+                        "iteration": 0
+                      }
+                    }
+                  }
+                }
               },
               "4": {
-                "durabilities": [
-                  "Low"
-                ],
-                "revisions": [
-                  1
-                ],
-                "fields": [
-                  2
-                ]
+                "inner": {
+                  "durabilities": [
+                    "Low"
+                  ],
+                  "revisions": [
+                    1
+                  ],
+                  "fields": [
+                    2
+                  ]
+                },
+                "memos": {}
               }
             },
             "2": {
               "2049": {
-                "durability": "High",
-                "last_interned_at": 1,
-                "fields": [
-                  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                ]
+                "inner": {
+                  "durability": "High",
+                  "last_interned_at": 1,
+                  "fields": [
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  ]
+                },
+                "memos": {}
               }
             },
             "3": {
               "3073": {
-                "durability": "Low",
-                "updated_at": 1,
-                "revisions": [],
-                "fields": [
-                  "a"
-                ]
+                "inner": {
+                  "durability": "Low",
+                  "updated_at": 1,
+                  "revisions": [],
+                  "fields": [
+                    "a"
+                  ]
+                },
+                "memos": {}
               }
             },
             "5": {
               "4097": {
-                "durability": "High",
-                "last_interned_at": 18446744073709551615,
-                "fields": [
-                  3,
-                  4
-                ]
-              }
-            },
-            "17": {
-              "1025": {
-                "durability": "High",
-                "last_interned_at": 18446744073709551615,
-                "fields": null
-              }
-            },
-            "4": {
-              "5:4097": {
-                "value": "aaa",
-                "verified_at": 1,
-                "revisions": {
-                  "changed_at": 1,
-                  "durability": "Low",
-                  "origin": {
-                    "Derived": [
-                      {
-                        "key": {
-                          "key_index": 3,
-                          "ingredient_index": 1
-                        }
+                "inner": {
+                  "durability": "High",
+                  "last_interned_at": 18446744073709551615,
+                  "fields": [
+                    3,
+                    4
+                  ]
+                },
+                "memos": {
+                  "0": {
+                    "value": "aaa",
+                    "verified_at": 1,
+                    "revisions": {
+                      "changed_at": 1,
+                      "durability": "Low",
+                      "origin": {
+                        "Derived": [
+                          {
+                            "key": {
+                              "key_index": 3,
+                              "ingredient_index": 1
+                            }
+                          },
+                          {
+                            "key": {
+                              "key_index": 4,
+                              "ingredient_index": 1
+                            }
+                          }
+                        ]
                       },
-                      {
-                        "key": {
-                          "key_index": 4,
-                          "ingredient_index": 1
-                        }
-                      }
-                    ]
-                  },
-                  "verified_final": true,
-                  "extra": null
-                }
-              }
-            },
-            "6": {
-              "0:3": {
-                "value": 3073,
-                "verified_at": 1,
-                "revisions": {
-                  "changed_at": 1,
-                  "durability": "Low",
-                  "origin": {
-                    "Derived": [
-                      {
-                        "key": {
-                          "key_index": 3,
-                          "ingredient_index": 1
-                        }
-                      }
-                    ]
-                  },
-                  "verified_final": true,
-                  "extra": {
-                    "tracked_struct_ids": [
-                      [
-                        {
-                          "ingredient_index": 3,
-                          "hash": 6073466998405137972,
-                          "disambiguator": 0
-                        },
-                        3073
-                      ]
-                    ],
-                    "cycle_heads": [],
-                    "iteration": 0
+                      "verified_final": true,
+                      "extra": null
+                    }
                   }
                 }
               }
             },
-            "16": {
-              "17:1025": {
-                "value": 2049,
-                "verified_at": 1,
-                "revisions": {
-                  "changed_at": 1,
+            "17": {
+              "1025": {
+                "inner": {
                   "durability": "High",
-                  "origin": {
-                    "Derived": [
-                      {
-                        "key": {
-                          "key_index": 2049,
-                          "ingredient_index": 2
-                        }
-                      }
-                    ]
-                  },
-                  "verified_final": true,
-                  "extra": null
+                  "last_interned_at": 18446744073709551615,
+                  "fields": null
+                },
+                "memos": {
+                  "0": {
+                    "value": 2049,
+                    "verified_at": 1,
+                    "revisions": {
+                      "changed_at": 1,
+                      "durability": "High",
+                      "origin": {
+                        "Derived": [
+                          {
+                            "key": {
+                              "key_index": 2049,
+                              "ingredient_index": 2
+                            }
+                          }
+                        ]
+                      },
+                      "verified_final": true,
+                      "extra": null
+                    }
+                  }
                 }
               }
             }
@@ -335,36 +362,38 @@ fn partial_query() {
           "ingredients": {
             "0": {
               "1": {
-                "durabilities": [
-                  "Low"
-                ],
-                "revisions": [
-                  1
-                ],
-                "fields": [
-                  0
-                ]
-              }
-            },
-            "11": {
-              "0:1": {
-                "value": 1,
-                "verified_at": 1,
-                "revisions": {
-                  "changed_at": 1,
-                  "durability": "Low",
-                  "origin": {
-                    "Derived": [
-                      {
-                        "key": {
-                          "key_index": 1,
-                          "ingredient_index": 1
-                        }
-                      }
-                    ]
-                  },
-                  "verified_final": true,
-                  "extra": null
+                "inner": {
+                  "durabilities": [
+                    "Low"
+                  ],
+                  "revisions": [
+                    1
+                  ],
+                  "fields": [
+                    0
+                  ]
+                },
+                "memos": {
+                  "2": {
+                    "value": 1,
+                    "verified_at": 1,
+                    "revisions": {
+                      "changed_at": 1,
+                      "durability": "Low",
+                      "origin": {
+                        "Derived": [
+                          {
+                            "key": {
+                              "key_index": 1,
+                              "ingredient_index": 1
+                            }
+                          }
+                        ]
+                      },
+                      "verified_final": true,
+                      "extra": null
+                    }
+                  }
                 }
               }
             }
@@ -413,7 +442,7 @@ fn partial_query() {
 }
 
 #[test]
-fn partial_query_interned() {
+fn partxial_query_interned() {
     use salsa::plumbing::{AsId, FromId, ZalsaDatabase};
 
     #[salsa::tracked(persist)]
@@ -453,61 +482,69 @@ fn partial_query_interned() {
           "ingredients": {
             "0": {
               "1": {
-                "durabilities": [
-                  "Low"
-                ],
-                "revisions": [
-                  1
-                ],
-                "fields": [
-                  0
-                ]
+                "inner": {
+                  "durabilities": [
+                    "Low"
+                  ],
+                  "revisions": [
+                    1
+                  ],
+                  "fields": [
+                    0
+                  ]
+                },
+                "memos": {}
               }
             },
             "2": {
               "3073": {
-                "durability": "Low",
-                "last_interned_at": 1,
-                "fields": [
-                  "0"
-                ]
+                "inner": {
+                  "durability": "Low",
+                  "last_interned_at": 1,
+                  "fields": [
+                    "0"
+                  ]
+                },
+                "memos": {}
               }
             },
             "15": {
               "1025": {
-                "durability": "High",
-                "last_interned_at": 18446744073709551615,
-                "fields": [
-                  1,
-                  0
-                ]
-              }
-            },
-            "14": {
-              "15:1025": {
-                "value": 3073,
-                "verified_at": 1,
-                "revisions": {
-                  "changed_at": 1,
-                  "durability": "Low",
-                  "origin": {
-                    "Derived": [
-                      {
-                        "key": {
-                          "key_index": 1,
-                          "ingredient_index": 1
-                        }
+                "inner": {
+                  "durability": "High",
+                  "last_interned_at": 18446744073709551615,
+                  "fields": [
+                    1,
+                    0
+                  ]
+                },
+                "memos": {
+                  "0": {
+                    "value": 3073,
+                    "verified_at": 1,
+                    "revisions": {
+                      "changed_at": 1,
+                      "durability": "Low",
+                      "origin": {
+                        "Derived": [
+                          {
+                            "key": {
+                              "key_index": 1,
+                              "ingredient_index": 1
+                            }
+                          },
+                          {
+                            "key": {
+                              "key_index": 3073,
+                              "ingredient_index": 2
+                            }
+                          }
+                        ]
                       },
-                      {
-                        "key": {
-                          "key_index": 3073,
-                          "ingredient_index": 2
-                        }
-                      }
-                    ]
-                  },
-                  "verified_final": true,
-                  "extra": null
+                      "verified_final": true,
+                      "extra": null
+                    }
+                  }
                 }
               }
             }

@@ -410,14 +410,68 @@ impl Zalsa {
     /// **NOT SEMVER STABLE**
     #[doc(hidden)]
     pub fn take_ingredient(&mut self, index: IngredientIndex) -> Box<dyn Ingredient> {
-        self.ingredients_vec.remove(index.as_u32() as usize)
+        #[derive(Debug)]
+        struct TakenIngredient;
+
+        impl Ingredient for TakenIngredient {
+            fn debug_name(&self) -> &'static str {
+                panic!("attempted to access ingredient currently being deserialized")
+            }
+
+            fn location(&self) -> &'static crate::plumbing::Location {
+                panic!("attempted to access ingredient currently being deserialized")
+            }
+
+            fn jar_kind(&self) -> JarKind {
+                panic!("attempted to access ingredient currently being deserialized")
+            }
+
+            unsafe fn maybe_changed_after(
+                &self,
+                _: &crate::zalsa::Zalsa,
+                _: RawDatabase<'_>,
+                _: Id,
+                _: Revision,
+                _: &mut crate::function::VerifyCycleHeads,
+            ) -> crate::function::VerifyResult {
+                panic!("attempted to access ingredient currently being deserialized")
+            }
+
+            fn collect_minimum_serialized_edges(
+                &self,
+                _: &Zalsa,
+                _: crate::zalsa_local::QueryEdge,
+                _: &mut crate::hash::FxIndexSet<crate::zalsa_local::QueryEdge>,
+                _: &mut crate::hash::FxHashSet<crate::zalsa_local::QueryEdge>,
+            ) {
+                panic!("attempted to access ingredient currently being deserialized")
+            }
+
+            fn ingredient_index(&self) -> IngredientIndex {
+                panic!("attempted to access ingredient currently being deserialized")
+            }
+
+            fn memo_table_types(&self) -> &std::sync::Arc<crate::table::memo::MemoTableTypes> {
+                panic!("attempted to access ingredient currently being deserialized")
+            }
+
+            fn memo_table_types_mut(
+                &mut self,
+            ) -> &mut std::sync::Arc<crate::table::memo::MemoTableTypes> {
+                panic!("attempted to access ingredient currently being deserialized")
+            }
+        }
+
+        std::mem::replace(
+            &mut self.ingredients_vec[index.as_u32() as usize],
+            Box::new(TakenIngredient),
+        )
     }
 
     /// **NOT SEMVER STABLE**
     #[doc(hidden)]
     pub fn replace_ingredient(&mut self, index: IngredientIndex, ingredient: Box<dyn Ingredient>) {
-        self.ingredients_vec
-            .insert(index.as_u32() as usize, ingredient);
+        self.ingredients_vec[index.as_u32() as usize] = ingredient;
     }
 
     /// **NOT SEMVER STABLE**

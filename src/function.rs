@@ -447,50 +447,30 @@ where
         self.accumulated_map(db, key_index)
     }
 
-    fn is_persistable(&self) -> bool {
-        C::PERSIST
-    }
-
-    fn should_serialize(&self, zalsa: &Zalsa) -> bool {
-        if !C::PERSIST {
-            return false;
-        }
-
-        // We only serialize the query if there are any memos associated with it.
-        for entry in <C::SalsaStruct<'_> as SalsaStructInDb>::entries(zalsa) {
-            let memo_ingredient_index = self.memo_ingredient_indices.get(entry.ingredient_index());
-
-            let memo =
-                self.get_memo_from_table_for(zalsa, entry.key_index(), memo_ingredient_index);
-
-            if memo.is_some_and(|memo| memo.should_serialize()) {
-                return true;
-            }
-        }
-
-        false
-    }
-
     #[cfg(feature = "persistence")]
-    unsafe fn serialize<'db>(
+    fn serialize_memo<'db>(
         &'db self,
         zalsa: &'db Zalsa,
+        memo: &'db dyn crate::table::memo::Memo,
         f: &mut dyn FnMut(&dyn erased_serde::Serialize),
     ) {
-        f(&persistence::SerializeIngredient {
+        f(&persistence::SerializeMemo {
             zalsa,
-            ingredient: self,
+            memo,
+            _ingredient: self,
         })
     }
 
     #[cfg(feature = "persistence")]
-    fn deserialize(
-        &mut self,
-        zalsa: &mut Zalsa,
+    fn deserialize_memo<'db>(
+        &'db self,
+        memo_table: &mut crate::table::memo::MemoTableWithTypesMut<'db>,
+        ingredient_index: IngredientIndex,
         deserializer: &mut dyn erased_serde::Deserializer,
     ) -> Result<(), erased_serde::Error> {
-        let deserialize = persistence::DeserializeIngredient {
-            zalsa,
+        let deserialize = persistence::DeserializeMemo {
+            memo_table,
+            ingredient_index,
             ingredient: self,
         };
 
@@ -513,25 +493,27 @@ where
 mod persistence {
     use super::{Configuration, IngredientImpl, Memo};
     use crate::hash::{FxHashSet, FxIndexSet};
-    use crate::plumbing::{MemoIngredientMap, SalsaStructInDb};
+    use crate::plumbing::MemoIngredientMap;
+    use crate::table::memo::MemoTableWithTypesMut;
     use crate::zalsa::Zalsa;
     use crate::zalsa_local::{QueryEdge, QueryOrigin, QueryOriginRef};
-    use crate::{Id, IngredientIndex};
+    use crate::IngredientIndex;
 
-    use serde::de;
-    use serde::ser::SerializeMap;
+    use serde::de::{self, Deserialize};
 
+    use std::any::Any;
     use std::ptr::NonNull;
 
-    pub struct SerializeIngredient<'db, C>
+    pub struct SerializeMemo<'db, C>
     where
         C: Configuration,
     {
         pub zalsa: &'db Zalsa,
-        pub ingredient: &'db IngredientImpl<C>,
+        pub memo: &'db dyn crate::table::memo::Memo,
+        pub _ingredient: &'db IngredientImpl<C>,
     }
 
-    impl<C> serde::Serialize for SerializeIngredient<'_, C>
+    impl<C> serde::Serialize for SerializeMemo<'_, C>
     where
         C: Configuration,
     {
@@ -539,59 +521,33 @@ mod persistence {
         where
             S: serde::Serializer,
         {
-            let Self { ingredient, zalsa } = self;
+            let Self { zalsa, memo, .. } = *self;
 
-            let mut map = serializer.serialize_map(None)?;
+            let memo: &Memo<C> =
+                <dyn Any>::downcast_ref(memo).expect("attempted to serialize incorrect memo type");
 
-            for entry in <C::SalsaStruct<'_> as SalsaStructInDb>::entries(zalsa) {
-                let memo_ingredient_index = ingredient
-                    .memo_ingredient_indices
-                    .get(entry.ingredient_index());
-
-                let memo = ingredient.get_memo_from_table_for(
-                    zalsa,
-                    entry.key_index(),
-                    memo_ingredient_index,
-                );
-
-                if let Some(memo) = memo.filter(|memo| memo.should_serialize()) {
-                    // Flatten the dependencies of this query down to the base inputs.
-                    let flattened_origin = match memo.revisions.origin.as_ref() {
-                        QueryOriginRef::Derived(edges) => {
-                            QueryOrigin::derived(flatten_edges(zalsa, edges))
-                        }
-                        QueryOriginRef::DerivedUntracked(edges) => {
-                            QueryOrigin::derived_untracked(flatten_edges(zalsa, edges))
-                        }
-                        QueryOriginRef::Assigned(key) => {
-                            let dependency = zalsa.lookup_ingredient(key.ingredient_index());
-                            assert!(
-                                dependency.is_persistable(),
-                                "specified query `{}` must be persistable",
-                                dependency.debug_name()
-                            );
-
-                            QueryOrigin::assigned(key)
-                        }
-                        QueryOriginRef::FixpointInitial => unreachable!(
-                            "`should_serialize` returns `false` for provisional queries"
-                        ),
-                    };
-
-                    let memo = memo.with_origin(flattened_origin);
-
-                    // TODO: Group structs by ingredient index into a nested map.
-                    let key = format!(
-                        "{}:{}",
-                        entry.ingredient_index().as_u32(),
-                        entry.key_index().as_bits()
+            // Flatten the dependencies of this query down to the base inputs.
+            let flattened_origin = match memo.revisions.origin.as_ref() {
+                QueryOriginRef::Derived(edges) => QueryOrigin::derived(flatten_edges(zalsa, edges)),
+                QueryOriginRef::DerivedUntracked(edges) => {
+                    QueryOrigin::derived_untracked(flatten_edges(zalsa, edges))
+                }
+                QueryOriginRef::Assigned(key) => {
+                    let dependency = zalsa.lookup_ingredient(key.ingredient_index());
+                    assert!(
+                        dependency.is_persistable(),
+                        "specified query `{}` must be persistable",
+                        dependency.debug_name()
                     );
 
-                    map.serialize_entry(&key, &memo)?;
+                    QueryOrigin::assigned(key)
                 }
-            }
+                QueryOriginRef::FixpointInitial => {
+                    unreachable!("`should_serialize` returns `false` for provisional queries")
+                }
+            };
 
-            map.end()
+            memo.with_origin(flattened_origin).serialize(serializer)
         }
     }
 
@@ -621,15 +577,16 @@ mod persistence {
         flattened_edges
     }
 
-    pub struct DeserializeIngredient<'db, C>
+    pub struct DeserializeMemo<'table, 'db, C>
     where
         C: Configuration,
     {
-        pub zalsa: &'db Zalsa,
-        pub ingredient: &'db mut IngredientImpl<C>,
+        pub memo_table: &'table mut MemoTableWithTypesMut<'db>,
+        pub ingredient_index: IngredientIndex,
+        pub ingredient: &'db IngredientImpl<C>,
     }
 
-    impl<'de, C> de::DeserializeSeed<'de> for DeserializeIngredient<'_, C>
+    impl<'de, C> de::DeserializeSeed<'de> for DeserializeMemo<'_, '_, C>
     where
         C: Configuration,
     {
@@ -639,49 +596,22 @@ mod persistence {
         where
             D: serde::Deserializer<'de>,
         {
-            deserializer.deserialize_map(self)
-        }
-    }
+            let Self {
+                memo_table,
+                ingredient_index,
+                ingredient,
+                ..
+            } = self;
 
-    impl<'de, C> de::Visitor<'de> for DeserializeIngredient<'_, C>
-    where
-        C: Configuration,
-    {
-        type Value = ();
+            let memo = Memo::<C>::deserialize(deserializer)?;
 
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("a map")
-        }
+            let memo_ingredient_index = ingredient.memo_ingredient_indices.get(ingredient_index);
 
-        fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
-        where
-            M: de::MapAccess<'de>,
-        {
-            let DeserializeIngredient { zalsa, ingredient } = self;
-
-            while let Some((key, memo)) = access.next_entry::<String, Memo<C>>()? {
-                let (ingredient_index, id) = key
-                    .split_once(':')
-                    .ok_or_else(|| de::Error::custom("invalid database key"))?;
-
-                let ingredient_index = IngredientIndex::new(
-                    ingredient_index.parse::<u32>().map_err(de::Error::custom)?,
-                );
-
-                let id = Id::from_bits(id.parse::<u64>().map_err(de::Error::custom)?);
-
-                let memo_ingredient_index =
-                    ingredient.memo_ingredient_indices.get(ingredient_index);
-
-                // SAFETY: We provide the current revision.
-                let memo_table = unsafe { zalsa.table().dyn_memos(id, zalsa.current_revision()) };
-
-                memo_table.insert(
-                    memo_ingredient_index,
-                    // FIXME: Use `Box::into_non_null` once stable.
-                    NonNull::from(Box::leak(Box::new(memo))),
-                );
-            }
+            memo_table.insert(
+                memo_ingredient_index,
+                // FIXME: Use `Box::into_non_null` once stable.
+                NonNull::from(Box::leak(Box::new(memo))),
+            );
 
             Ok(())
         }

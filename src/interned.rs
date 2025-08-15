@@ -976,7 +976,7 @@ where
     ) {
         f(&persistence::SerializeIngredient {
             zalsa,
-            _ingredient: self,
+            ingredient: self,
         })
     }
 
@@ -1321,6 +1321,7 @@ mod persistence {
 
     use super::{Configuration, IngredientImpl, Value, ValueShared};
     use crate::plumbing::Ingredient;
+    use crate::table::memo::persistence::{DeserializeValueWithMemos, SerializeValueWithMemos};
     use crate::table::memo::MemoTable;
     use crate::zalsa::Zalsa;
     use crate::{Durability, Id, Revision};
@@ -1330,7 +1331,7 @@ mod persistence {
         C: Configuration,
     {
         pub zalsa: &'db Zalsa,
-        pub _ingredient: &'db IngredientImpl<C>,
+        pub ingredient: &'db IngredientImpl<C>,
     }
 
     impl<C> serde::Serialize for SerializeIngredient<'_, C>
@@ -1341,7 +1342,7 @@ mod persistence {
         where
             S: serde::Serializer,
         {
-            let Self { zalsa, .. } = self;
+            let Self { zalsa, ingredient } = self;
 
             let mut map = serializer.serialize_map(None)?;
 
@@ -1350,7 +1351,22 @@ mod persistence {
                 // to the database.
                 let id = unsafe { (*value.shared.get()).id };
 
-                map.serialize_entry(&id.as_bits(), value)?;
+                // SAFETY: The safety invariant of `Ingredient::serialize` ensures we have exclusive access
+                // to the database.
+                let memos = unsafe { &mut *value.memos.get() };
+
+                // SAFETY: The memo table belongs to a value that we allocated, so it has the
+                // correct type.
+                let memos = unsafe { ingredient.memo_table_types.attach_memos(memos) };
+
+                let value = SerializeValueWithMemos::new(
+                    zalsa,
+                    value,
+                    ingredient.ingredient_index(),
+                    memos,
+                );
+
+                map.serialize_entry(&id.as_bits(), &value)?;
             }
 
             map.end()
@@ -1447,9 +1463,26 @@ mod persistence {
         {
             let DeserializeIngredient { zalsa, ingredient } = self;
 
-            while let Some((id, value)) = access.next_entry::<u64, DeserializeValue<C>>()? {
+            while let Some(id) = access.next_key::<u64>()? {
                 let id = Id::from_bits(id);
                 let (page_idx, _) = crate::table::split_id(id);
+
+                // SAFETY: We only ever access the memos of a value that we allocated through
+                // our `MemoTableTypes`.
+                let mut memos = unsafe { MemoTable::new(ingredient.memo_table_types()) };
+
+                // SAFETY: The memo table belongs to a value that we allocated, so it has the
+                // correct type.
+                let mut memos_with_types =
+                    unsafe { ingredient.memo_table_types.attach_memos_mut(&mut memos) };
+
+                // Deserialize the value and fill the memo table.
+                let value: DeserializeValue<C> =
+                    access.next_value_seed(DeserializeValueWithMemos::new(
+                        zalsa,
+                        ingredient.ingredient_index(),
+                        &mut memos_with_types,
+                    ))?;
 
                 // Determine the value shard.
                 let hash = ingredient.hasher.hash_one(&value.fields.0);
@@ -1461,11 +1494,7 @@ mod persistence {
                 let value = Value::<C> {
                     shard: shard_index as u16,
                     link: LinkedListLink::new(),
-                    // SAFETY: We only ever access the memos of a value that we allocated through
-                    // our `MemoTableTypes`.
-                    memos: UnsafeCell::new(unsafe {
-                        MemoTable::new(ingredient.memo_table_types())
-                    }),
+                    memos: UnsafeCell::new(memos),
                     fields: UnsafeCell::new(value.fields.0),
                     shared: UnsafeCell::new(ValueShared {
                         id,

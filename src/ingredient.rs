@@ -247,6 +247,34 @@ pub trait Ingredient: Any + std::fmt::Debug + Send + Sync {
             "called `deserialize` on ingredient where `should_serialize` returns `false`"
         )
     }
+
+    /// Serialize a memo created by the given ingredient.
+    ///
+    /// This function should invoke the provided callback with a reference to an object implementing [`erased_serde::Serialize`].
+    ///
+    /// # Panics
+    ///
+    /// The provided memo must have been created by this tracked function ingredient.
+    #[cfg(feature = "persistence")]
+    fn serialize_memo<'db>(
+        &'db self,
+        _zalsa: &'db Zalsa,
+        _memo: &'db dyn crate::table::memo::Memo,
+        _f: &mut dyn FnMut(&dyn erased_serde::Serialize),
+    ) {
+        unimplemented!("`serialize_memo` is only implemented for tracked function ingredients")
+    }
+
+    /// Deserialize a memo.
+    #[cfg(feature = "persistence")]
+    fn deserialize_memo<'db>(
+        &'db self,
+        _memo_table: &mut crate::table::memo::MemoTableWithTypesMut<'db>,
+        _ingredient_index: IngredientIndex,
+        _deserializer: &mut dyn erased_serde::Deserializer,
+    ) -> Result<(), erased_serde::Error> {
+        unimplemented!("`deserialize_memo` is only implemented for tracked function ingredients")
+    }
 }
 
 impl dyn Ingredient {
